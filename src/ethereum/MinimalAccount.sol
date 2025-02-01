@@ -5,45 +5,99 @@ import {IAccount} from "lib/account-abstraction/contracts/interfaces/IAccount.so
 import {PackedUserOperation} from "lib/account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {SIG_VALIDATION_FAILED, SIG_VALIDATION_SUCCESS} from "lib/account-abstraction/contracts/core/Helpers.sol";
+import {IEntryPoint} from "lib/account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {SIG_VALIDATION_FAILED,SIG_VALIDATION_SUCCESS} from "lib/account-abstraction/contracts/core/Helpers.sol";
 
- 
-contract MinimalAccount is Ownable(msg.sender),IAccount{
+contract MinimalAccount is Ownable, IAccount {
 
-    //this function is nothing but entrypoint.sol we are using this one from IAccount.sol interface
-    // PackedUserOperation one is nothing kind of struct as follow below 
-    //     struct PackedUserOperation {
-    //     address sender; --> Our minimal account which means wallet
-    //     uint256 nonce; -->kind of sequencec and noo only repeat once
-    //     bytes initCode; -->igonre
-    //     bytes callData; --> this where we put good stuff
-    //     bytes32 accountGasLimits; 
-    //     uint256 preVerificationGas;
-    //     bytes32 gasFees;
-    //     bytes paymasterAndData; --> minimal coount holder should pay the gas fee instead on behahlf us third part can pay
-    //     bytes signature;
-    // signature is nothing but combination of above all data expect bytes signature;, 
-    // userOp is notihng above data , userOpHash is signed hash
-    // }
-    function validateUserOp(
-            PackedUserOperation calldata userOp,
-            bytes32 userOpHash,
-            uint256 missingAccountFunds
-        ) external returns (uint256 validationData){
-            validationData=_validateSignature(userOp,userOpHash);
-            _payPrefund(missingAccountFunds) //
+    /*////////////////////////////////////////////
+                    ERRORS
+    ////////////////////////////////////////////*/
+    error MinimalAccount__NotFromEntryPoint();
+    error MinimalAccount__NotFromEntryPointOrOwner();
+    error MinimalAccount__CallFailed(bytes);
+
+    /*////////////////////////////////////////////
+                    STATE VARIABLES
+    ////////////////////////////////////////////*/
+    IEntryPoint private immutable i_entryPoint;
+
+    /*////////////////////////////////////////////
+                    MODIFIERS
+    ////////////////////////////////////////////*/
+    modifier requireFromEntryPoint() {
+        if (msg.sender != address(i_entryPoint)) {
+            revert MinimalAccount__NotFromEntryPoint();
         }
+        _;
+    }
 
-        //validate signature is correct or not
-    function _validateSignature(PackedUserOperation calldata userOp,bytes32 userOpHash) internal view returns(uint256 validationData){
-        // we need to convert this userOpHash into normal hash for this we use MessageHashUtils
-        bytes32 ethSignedMsgHash=MessageHashUtils.toEthSignedMessageHash(userOpHash);
-        address singer=ECDSA.recover(ethSignedMsgHash,userOp.signature);
-        if(singer !=owner()){
+    modifier requireFromEntryPointOrOwner() {
+        if (msg.sender != address(i_entryPoint) && msg.sender != owner()) {
+            revert MinimalAccount__NotFromEntryPointOrOwner();
+        }
+        _;
+    }
+    
+    /*////////////////////////////////////////////
+                    FUNCTIONS
+    ////////////////////////////////////////////*/
+    constructor(address entryPoint) Ownable(msg.sender) {
+        i_entryPoint = IEntryPoint(entryPoint);
+    }
+    
+    receive() external payable {}
+
+    /*////////////////////////////////////////////
+                    EXTERNAL FUNCTIONS
+    ////////////////////////////////////////////*/
+    function execute(address dist, uint256 value, bytes calldata functionData) external requireFromEntryPointOrOwner {
+        (bool success, bytes memory result) = dist.call{value: value}(functionData);
+        if (!success) {
+            revert MinimalAccount__CallFailed(result);
+        }
+    }
+    
+    function validateUserOp(
+        PackedUserOperation calldata userOp,
+        bytes32 userOpHash,
+        uint256 missingAccountFunds
+    ) external requireFromEntryPoint returns (uint256 validationData) {
+        validationData = _validateSignature(userOp, userOpHash);
+        _payPrefund(missingAccountFunds); // this is for EntryPoint.sol fee, which can be paid by third parties like paymaster or owner
+    }
+
+    /*////////////////////////////////////////////
+                   INTERNAL FUNCTIONS
+    ////////////////////////////////////////////*/
+    function _validateSignature(PackedUserOperation calldata userOp, bytes32 userOpHash) internal view returns (uint256 validationData) {
+        bytes32 ethSignedMsgHash = MessageHashUtils.toEthSignedMessageHash(userOpHash);
+        address signer = ECDSA.recover(ethSignedMsgHash, userOp.signature);
+        if (signer != owner()) {
             return SIG_VALIDATION_FAILED;
         }
         return SIG_VALIDATION_SUCCESS;
+    }
 
+    function _payPrefund(uint256 missingAccountFunds) internal {
+        if (missingAccountFunds != 0) {
+            (bool success, ) = payable(msg.sender).call{value: missingAccountFunds, gas: type(uint256).max}("");
+           (success);
+        }
+    }
+
+    // function _payPrefund(uint256 missingAccountFunds) internal {
+    //     if (missingAccountFunds != 0) {
+    //         (bool success,) = payable(msg.sender).call{value: missingAccountFunds, gas: type(uint256).max}("");
+    //         (success);
+    //     }
+    // }
+
+    /*////////////////////////////////////////////
+                    GETTERS
+    ////////////////////////////////////////////*/
+    function getEntryPoint() public view returns (address) {
+        return address(i_entryPoint);
     }
 }
