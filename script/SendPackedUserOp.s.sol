@@ -10,7 +10,7 @@ import {MinimalAccount} from "../src/ethereum/MinimalAccount.sol";
 contract SendPackedUserOp is Script{
     using MessageHashUtils for bytes32;
     // MinimalAccount minimalAccount=new MinimalAccount();
-    function run() public {}
+    function run() public {}  //Here whatever we want to deploy like arbiturm or any main we can structure like that last testing function model
  
     function generatedSignedUserOperation(bytes memory callData,HelperConfig.NetworkConfig memory config,address minimalAccount) public view returns(PackedUserOperation memory){
         //1.Generate the un-signed data

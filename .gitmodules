@@ -10,3 +10,6 @@
 [submodule "lib/headers"]
 	path = lib/headers
 	url = https://github.com/transmissions11/headers
+[submodule "lib/foundry-era-contracts"]
+	path = lib/foundry-era-contracts
+	url = https://github.com/Cyfrin/foundry-era-contracts
